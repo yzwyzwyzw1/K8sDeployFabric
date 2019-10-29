@@ -1,0 +1,239 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: org1-example-com
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: org1-example-com
+  name: ca
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hyperledger
+  template:
+    metadata:
+      labels:
+        app: hyperledger
+        role: ca
+        org: org1-example-com
+        name: ca
+    spec:
+      containers:
+      - name: ca
+        image: hyperledger/fabric-ca:latest
+        env:
+        - name:  FABRIC_CA_HOME
+          value: /etc/hyperledger/fabric-ca-server
+        - name:  FABRIC_CA_SERVER_CA_NAME
+          value: ca-org1
+        - name: FABRIC_CA_SERVER_CA_CERTFILE
+          value: /etc/hyperledger/fabric-ca-server-config/ca.org1-example-com-cert.pem
+        - name: FABRIC_CA_SERVER_CA_KEYFILE
+          value: /etc/hyperledger/fabric-ca-server-config/a98f2e9ba6f2e7daaa5083cb8159ecbe31eebf0c9f01df46c655bc00bb636ce7_sk
+        - name:  FABRIC_CA_SERVER_TLS_ENABLED
+          value: "true"
+        ports:
+        - containerPort: 7054
+        command: ["sh"]
+        args: ["-c", "fabric-ca-server start --ca.certfile /etc/hyperledger/fabric-ca-server-config/ca.org1-example-com-cert.pem --ca.keyfile /etc/hyperledger/fabric-ca-server-config/a98f2e9ba6f2e7daaa5083cb8159ecbe31eebf0c9f01df46c655bc00bb636ce7_sk -b admin:adminpw -d"]
+        volumeMounts:
+        - name: org1ca
+          readOnly: false
+          mountPath: /etc/hyperledger/fabric-ca-server-config/
+      volumes:
+      - name: org1ca
+        hostPath:
+          path: /root/K8sDeployFabric/fixture/crypto-config/peerOrganizations/org1-example-com/ca/
+--- 
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: org1-example-com
+  name: ca
+spec:
+  selector:
+    app: hyperledger
+    role: ca
+    org: org1-example-com
+    name: ca
+  clusterIP: None
+  ports:
+  - name: endpoint
+    protocol: TCP
+    port: 7054
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: org1-example-com
+  name:	peer0-org1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hyperledger
+  template:
+    metadata:
+      labels:
+        app: hyperledger
+        role: peer
+        peer-id: peer0
+        org: peer-org1
+    spec:
+      containers:
+      - name: peer0-org1
+        image: hyperledger/fabric-peer:latest
+        env:
+        - name: CORE_VM_ENDPOINT
+          value: "unix:///host/var/run/docker.sock"
+        - name: FABRIC_LOGGING_SPEC
+          value: "DEBUG"
+        - name: CORE_PEER_TLS_ENABLED
+          value: "true"
+        - name: CORE_PEER_GOSSIP_USELEADERELECTION
+          value: "true"
+        - name: CORE_PEER_GOSSIP_ORGLEADER
+          value: "false"
+        - name: CORE_PEER_PROFILE_ENABLED
+          value: "true"
+        - name: CORE_PEER_TLS_CERT_FILE
+          value: "/etc/hyperledger/fabric/tls/server.crt"
+        - name: CORE_PEER_TLS_KEY_FILE
+          value: "/etc/hyperledger/fabric/tls/server.key"
+        - name: CORE_PEER_TLS_ROOTCERT_FILE
+          value: "/etc/hyperledger/fabric/tls/ca.crt"
+        - name: CORE_PEER_TLS_SERVERHOSTOVERRIDE
+          value: peer0.org1-shuolitech-cn
+        - name: CORE_PEER_ID
+          value: "peer0.org1-example-com"
+        - name: CORE_PEER_ADDRESS
+          value: "peer0.org1-example-com:7051"
+        - name: CORE_PEER_GOSSIP_EXTERNALENDPOINT
+          value: "peer0.org1-example-com:7051"
+        - name: CORE_PEER_LOCALMSPID
+          value: "Org1MSP"
+        - name: CORE_PEER_ADDRESSAUTODETECT
+          value: "true"
+        workingDir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+        ports:
+        - containerPort: 7051
+        - containerPort: 7052
+        - containerPort: 7053
+        command: ["peer"]
+        args: ["node","start"]
+        volumeMounts:
+        - name: msp
+          mountPath: /etc/hyperledger/fabric/msp
+        - name: tls
+          mountPath: /etc/hyperledger/fabric/tls
+        - name: run
+          mountPath: /host/var/run/
+      volumes:
+      - name: msp
+        hostPath:
+          path: /root/K8sDeployFabric/fixture/crypto-config/peerOrganizations/org1-example-com/peers/peer0.org1-example-com/msp
+      - name: tls
+        hostPath:
+          path: /root/K8sDeployFabric/fixture/crypto-config/peerOrganizations/org1-example-com/peers/peer0.org1-example-com/tls
+      - name: run
+        hostPath:
+          path: /var/run
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: org1-example-com
+  name: peer0
+spec:
+  selector:
+    app: hyperledger
+    role: peer
+    peer-id: peer0
+    org: peer-org1
+  clusterIP: None
+  ports:
+  - name: listen-endpoint
+    protocol: TCP
+    port: 7051
+  - name: chaincode-listen
+    protocol: TCP
+    port: 7052
+
+  - name: event-listen
+    protocol: TCP
+    port: 7053
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: org1-example-com
+  name: cli
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cli
+  template:
+    metadata:
+      labels:
+        app: cli
+    spec:
+      containers:
+      - name: cli
+        image: hyperledger/fabric-tools:latest
+        env:
+        - name: CORE_VM_ENDPOINT
+          value: "unix:///host/var/run/docker.sock"
+        - name: GOPATH
+          value: "/opt/gopath"
+        - name: FABRIC_LOGGING_SPEC
+          value: "DEBUG"
+        - name: CORE_PEER_ID
+          value: "cli"
+        - name: CORE_PEER_TLS_ENABLED
+          value: "true"
+        - name: CORE_PEER_TLS_CERT_FILE
+          value: "/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1-example-com/peers/peer0.org1-example-com/tls/server.crt"
+        - name: CORE_PEER_TLS_KEY_FILE
+          value: "/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1-example-com/peers/peer0.org1-example-com/tls/server.key"
+        - name: CORE_PEER_TLS_ROOTCERT_FILE
+          value: "/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1-example-com/peers/peer0.org1-example-com/tls/ca.crt"
+        - name: CORE_PEER_MSPCONFIGPATH
+          value: "/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1-example-com/users/Admin@org1-example-com/msp"
+        - name: CORE_PEER_ADDRESS
+          value: "peer0.org1-example-com:7051"
+        - name: CORE_PEER_LOCALMSPID
+          value: "Org1MSP"
+        workingDir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+        command: [ "/bin/bash", "-c", "--" ]
+        args: [ "while true; do sleep 30; done;" ]
+        volumeMounts:
+        - name: run
+          mountPath: /host/var/run/
+        - name: chaincode
+          mountPath: /opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode/example/
+        - name: crypto-config
+          mountPath: /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/
+        - name: channel-artifacts
+          mountPath: /opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts/
+        - name: scripts
+          mountPath: /opt/gopath/src/github.com/hyperledger/fabric/peer/scripts/
+      volumes:
+      - name: run
+        hostPath:
+          path: /var/run
+      - name: chaincode
+        hostPath:
+          path: /root/K8sDeployFabric/chaincode/example/
+      - name: crypto-config
+        hostPath:
+          path: /root/K8sDeployFabric/fixture/crypto-config/
+      - name: channel-artifacts
+        hostPath:
+          path: /root/K8sDeployFabric/fixture/channel-artifacts/
+      - name: scripts
+        hostPath:
+          path: /root/K8sDeployFabric/scripts/
